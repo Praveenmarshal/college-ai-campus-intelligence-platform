@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+#
+# Blocks commits that would leak secrets to GitHub.
+# Install once per clone:  git config core.hooksPath .githooks
+#
+# Checks:
+#   1. Refuses to commit any literal .env file (only .env.example is allowed)
+#   2. Scans staged diffs for common secret patterns (API keys, Mongo URIs
+#      with credentials, AWS keys, private key blocks, Twilio tokens, etc.)
+
+set -euo pipefail
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+blocked=0
+
+# ── 1. Block literal .env files ──────────────────────────────
+staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+
+for f in $staged_files; do
+  base=$(basename "$f")
+  if [[ "$base" == ".env" || "$base" =~ ^\.env\.[a-zA-Z0-9_-]+$ ]] && [[ "$base" != ".env.example" ]]; then
+    echo -e "${RED}✖ BLOCKED:${NC} '$f' looks like a real environment file, not a template."
+    echo "  Only .env.example should ever be committed. Add real secrets to .env (already gitignored)."
+    blocked=1
+  fi
+done
+
+# ── 2. Scan staged content for secret-shaped strings ─────────
+secret_patterns=(
+  'mongodb(\+srv)?://[^:]+:[^@]+@'        # Mongo URI with embedded credentials
+  'AKIA[0-9A-Z]{16}'                      # AWS access key
+  'AC[a-f0-9]{32}'                        # Twilio Account SID
+  '[a-f0-9]{32}'                          # Twilio Auth Token / generic 32-hex secret
+  'sk-[A-Za-z0-9]{20,}'                   # OpenAI-style secret key
+  '-----BEGIN (RSA |EC )?PRIVATE KEY-----' # Private key block
+  'xox[baprs]-[A-Za-z0-9-]{10,}'          # Slack token
+)
+
+diff_content=$(git diff --cached -- . ':!*.lock' ':!*.md')
+
+for pattern in "${secret_patterns[@]}"; do
+  matches=$(echo "$diff_content" | grep -E "$pattern" || true)
+  if [[ -n "$matches" ]]; then
+    echo -e "${YELLOW}⚠ WARNING:${NC} staged changes contain a string matching pattern: $pattern"
+    echo "  Review the diff carefully before committing. If this is a placeholder, ignore."
+    blocked=1
+  fi
+done
+
+if [[ "$blocked" -eq 1 ]]; then
+  echo ""
+  echo -e "${RED}Commit blocked.${NC} Fix the issues above, or if this is a false positive,"
+  echo "commit with 'git commit --no-verify' (only do this if you're certain)."
+  exit 1
+fi
+
+exit 0

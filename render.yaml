@@ -1,0 +1,83 @@
+# render.yaml
+# Render Blueprint — defines the backend web service for one-click deploy.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Usage:
+#   1. Push this repo to GitHub
+#   2. On Render: New + → Blueprint → connect your repo → Render reads this file
+#   3. Render creates the service below; you only need to fill in secret env vars
+#      marked "sync: false" in the Render dashboard (never in this file)
+#
+# This deploys ONLY the backend. The frontend goes to Vercel separately —
+# see docs/DEPLOY_FREE_TIER.md for the full walkthrough.
+
+services:
+  - type: web
+    name: campus-ai-backend
+    runtime: python
+    plan: free
+    region: oregon          # pick the region closest to you/your users
+    branch: main
+    buildCommand: "pip install -r backend/requirements-render.txt"
+    startCommand: "cd backend && gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 'app:create_app()'"
+    healthCheckPath: /api/health/ping
+    autoDeploy: true
+
+    envVars:
+      # ── Non-secret config (safe to commit — no real values here) ──
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: FLASK_ENV
+        value: production
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: EMBEDDING_MODEL
+        value: all-MiniLM-L6-v2
+      - key: CHROMA_PERSIST_DIR
+        value: /opt/render/project/src/backend/chroma_db
+      - key: UPLOAD_FOLDER
+        value: /opt/render/project/src/backend/uploads
+      - key: OCR_ENGINE
+        value: tesseract
+      - key: MONGO_DB_NAME
+        value: campus_ai
+      - key: RATELIMIT_STORAGE_URL
+        value: memory://
+
+      # ── Secrets — set these in the Render dashboard, NOT here ──
+      # (sync: false means "Render will prompt for this value and store it
+      # encrypted; it is never written to this file or git history")
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY       # FIXED: was JWT_SECRET_KEy (wrong case)
+        sync: false
+      - key: MONGO_URI            # FIXED: was mongodb_url (wrong name)
+        sync: false
+      - key: GEMINI_API_KEY       # FIXED: was gemini_api_key (wrong name)
+        sync: false
+      - key: FRONTEND_URL         # FIXED: was Frontend_url (wrong name)
+        sync: false               # set to your Vercel URL, e.g. https://your-app.vercel.app
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: SEED_SECRET
+        sync: false               # optional — set a random value, call POST /api/auth/seed
+                                  # with header X-Seed-Secret matching it, then unset
+
+# Notes:
+# - Render's free tier spins the service down after 15 minutes of no traffic.
+#   The next request triggers a cold start (~30-60s). This is normal for a
+#   free demo and not a bug.
+# - Free tier has no persistent disk by default — uploaded files and the
+#   ChromaDB index will be WIPED on every redeploy/restart. Fine for a demo;
+#   for anything real, upgrade to a paid plan with a persistent disk, or
+#   point CHROMA_PERSIST_DIR/UPLOAD_FOLDER at external storage (S3, etc.)

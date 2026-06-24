@@ -1,0 +1,57 @@
+# .gitleaks.toml
+# Secret-scanning rules for the AI Campus Intelligence Platform.
+# Used by:
+#   - CI: .github/workflows/ci.yml (gitleaks-action, blocks merge on detection)
+#   - Local: `gitleaks detect --config .gitleaks.toml` (optional manual run)
+
+title = "campus-ai-platform-gitleaks-config"
+
+[extend]
+useDefault = true   # inherit Gitleaks' large built-in ruleset (AWS, Stripe, GitHub tokens, etc.)
+
+# ── Project-specific rules ───────────────────────────────────
+
+[[rules]]
+id = "mongodb-uri-with-credentials"
+description = "MongoDB connection string containing embedded username/password"
+regex = '''mongodb(\+srv)?://[^:\s]+:[^@\s]+@[^\s"'<>]+'''
+tags = ["mongodb", "credentials"]
+
+[[rules]]
+id = "twilio-account-sid"
+description = "Twilio Account SID"
+regex = '''\bAC[a-f0-9]{32}\b'''
+tags = ["twilio"]
+
+[[rules]]
+id = "twilio-auth-token"
+description = "Twilio Auth Token (generic 32-char hex secret near a Twilio reference)"
+regex = '''(?i)twilio[a-z_]*(token|secret)[a-z_]*["'\s:=]+[a-f0-9]{32}'''
+tags = ["twilio"]
+
+[[rules]]
+id = "jwt-flask-secret-assignment"
+description = "Hardcoded Flask SECRET_KEY / JWT_SECRET_KEY assigned a non-placeholder value"
+regex = '''(?i)(JWT_SECRET_KEY|SECRET_KEY)\s*=\s*["'](?!your-|change-in-prod|dev-secret|test-)[A-Za-z0-9+/=_-]{16,}["']'''
+tags = ["jwt", "flask"]
+
+# ── Allowlist — known-safe placeholder strings ───────────────
+# These appear in .env.example and docs intentionally and must NOT trigger alerts.
+
+[allowlist]
+description = "Placeholder values in .env.example and documentation"
+paths = [
+  '''\.env\.example$''',
+  '''docs/.*\.md$''',
+  '''README\.md$''',
+]
+regexes = [
+  '''your-super-secret-key-change-in-production''',
+  '''your-jwt-secret-key-change-in-production''',
+  '''<username>:<password>''',
+  '''your-email@gmail\.com''',
+  '''your-app-password''',
+  '''your-twilio-account-sid''',
+  '''your-twilio-auth-token''',
+  '''campus_app_pass_change_in_prod''',
+]

@@ -1,0 +1,167 @@
+name: CI/CD — AI Campus Intelligence Platform
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+
+  # ── Secret scanning — runs first, blocks everything else ──
+  secret-scan:
+    name: Security — Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for scanning)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - name: Verify no .env file is committed
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "::error::A real .env file is tracked in this repository. Remove it and rotate any exposed credentials immediately."
+            exit 1
+          fi
+          echo "✅ No .env file tracked in repository"
+
+  # ── Backend tests ──────────────────────────────────────────
+  backend-test:
+    name: Backend — Lint & Test
+    runs-on: ubuntu-latest
+    needs: secret-scan
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Lint (flake8)
+        working-directory: backend
+        run: flake8 . --max-line-length=100 --exclude=venv,.git,__pycache__
+
+      - name: Format check (black)
+        working-directory: backend
+        run: black --check --line-length=100 .
+
+      - name: Run tests with coverage
+        working-directory: backend
+        env:
+          FLASK_ENV: testing
+          MONGO_URI: mongodb://localhost:27017/campus_ai_test
+          JWT_SECRET_KEY: test-jwt-secret
+          SECRET_KEY: test-secret
+        run: |
+          pytest tests/ \
+            --cov=. \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -v
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          flags: backend
+
+  # ── Frontend tests ─────────────────────────────────────────
+  frontend-test:
+    name: Frontend — Lint & Test
+    runs-on: ubuntu-latest
+    needs: secret-scan
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint (ESLint)
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: frontend
+        run: npm run test:coverage
+
+      - name: Build check
+        working-directory: frontend
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: http://localhost:5000
+
+  # ── Docker build (main branch only) ───────────────────────
+  docker-build:
+    name: Docker — Build & Push
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./docker/Dockerfile.backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/campus-ai-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/campus-ai-backend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./docker/Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/campus-ai-frontend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/campus-ai-frontend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}

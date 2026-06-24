@@ -1,0 +1,78 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ── Node / Frontend ────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Environment ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Uploads & generated data ───────────────────────────────
+backend/uploads/pdfs/
+backend/uploads/excels/
+backend/uploads/csvs/
+backend/uploads/images/
+backend/uploads/resumes/
+backend/chroma_db/
+backend/chroma_db_test/
+backend/logs/
+chroma_db/
+chroma_db_test/
+logs/
+
+# ── ML Models (trained artifacts — regenerate via /api/ml/train) ──
+backend/services/ml/models/*.pkl
+backend/services/ml/models/*.joblib
+backend/services/ml/models/*.json
+!backend/services/ml/models/.gitkeep
+
+# ── IDE / OS ───────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.iml
+
+# ── Docker ─────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Testing ────────────────────────────────────────────────
+playwright-report/
+test-results/
+
+# ── Secrets / credentials (defense in depth beyond .env) ────
+*.pem
+*.key
+*credentials*.json
+*serviceAccount*.json
+.aws/
+.ssh/
+*.p12

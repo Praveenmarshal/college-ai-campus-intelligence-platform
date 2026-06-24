@@ -1,0 +1,135 @@
+version: '3.9'
+
+# ============================================================
+# AI Campus Intelligence Platform — Docker Compose
+# Usage:
+#   docker compose up --build          # Start all services
+#   docker compose up --build backend  # Start only backend
+# ============================================================
+
+services:
+
+  # ── Flask Backend ────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: campus_ai_backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/chroma_db:/app/chroma_db
+      - ./backend/logs:/app/logs
+    depends_on:
+      - mongo
+    networks:
+      - campus_ai_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── React Frontend ────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: campus_ai_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - campus_ai_net
+
+  # ── MongoDB (local fallback if not using Atlas) ───────────
+  mongo:
+    image: mongo:7.0
+    container_name: campus_ai_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
+      MONGO_INITDB_DATABASE: campus_ai
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:-campus_app}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?Set MONGO_APP_PASSWORD in .env}
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    networks:
+      - campus_ai_net
+
+  # ── Ollama (local LLM) ─────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: campus_ai_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - campus_ai_net
+    # GPU support (uncomment if NVIDIA GPU available)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ── Ollama model puller (runs once, pulls Qwen 3, then exits) ──
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: campus_ai_ollama_init
+    depends_on:
+      - ollama
+    entrypoint: ["sh", "-c", "sleep 5 && OLLAMA_HOST=ollama:11434 ollama pull qwen3:8b && echo 'Qwen 3 8B pulled successfully'"]
+    networks:
+      - campus_ai_net
+
+  # ── Redis (for rate limiting and Celery) ──────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: campus_ai_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - campus_ai_net
+
+  # ── Nginx (reverse proxy) ─────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: campus_ai_nginx
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - campus_ai_net
+
+
+volumes:
+  mongo_data:
+  ollama_data:
+  redis_data:
+
+networks:
+  campus_ai_net:
+    driver: bridge
